@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
+import './mission.js';
 
 const SUN = new THREE.Vector3(-0.75, 0.16, -0.65).normalize();
 const FOG = 0xd9a066;
@@ -184,16 +185,19 @@ function leaveTracks() {
 const keys = new Set();
 addEventListener('keydown', e => keys.add(e.code));
 addEventListener('keyup', e => keys.delete(e.code));
-const MAX_SPEED = 4, TURN = 1; // m/s, rad/s (mucho mas rapido que el rover real)
+const MAX_SPEED = 8, TURN = 1, G = 3.71 * 2.5; // m/s, rad/s (mucho mas rapido que el rover real), gravedad marciana x2.5 para que la pendiente se note
 let heading = 0, speed = 0, camSnap = true;
 const fwd = new THREE.Vector3(), right = new THREE.Vector3(), up = new THREE.Vector3(), t1 = new THREE.Vector3(), t2 = new THREE.Vector3();
 const basis = new THREE.Matrix4(), targetQ = new THREE.Quaternion(), camGoal = new THREE.Vector3(), look = new THREE.Vector3(), lookGoal = new THREE.Vector3();
 function drive(dt) {
   const throttle = keys.has('KeyW') - keys.has('KeyS'), steer = keys.has('KeyA') - keys.has('KeyD');
-  speed += (throttle * MAX_SPEED - speed) * Math.min(1, 3 * dt);
   heading += steer * TURN * dt;
   fwd.set(-Math.sin(heading), 0, -Math.cos(heading));
   right.set(Math.cos(heading), 0, -Math.sin(heading));
+  // pendiente al frente: subir frena, bajar empuja; sin acelerar, el rover rueda y se frena solo
+  const q = rover.position, slope = (height(q.x + fwd.x, q.z + fwd.z) - height(q.x - fwd.x, q.z - fwd.z)) / 2;
+  speed += (throttle * MAX_SPEED - speed) * (throttle ? 2 : 0.6) * dt - G * slope / Math.hypot(1, slope) * dt;
+  speed = THREE.MathUtils.clamp(speed, -MAX_SPEED * 1.5, MAX_SPEED * 1.5);
   rover.position.addScaledVector(fwd, speed * dt);
   // terreno bajo las 4 esquinas: altura media y inclinacion
   const p = rover.position, d = 1.4, hAt = (v, k) => height(p.x + v.x * d * k, p.z + v.z * d * k);
