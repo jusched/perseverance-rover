@@ -2,32 +2,32 @@ import { lightTimeMinutes } from './orbit.js';
 
 const LANDING = Date.UTC(2021, 1, 18, 20, 55);
 const NASA = 'NASA/JPL-Caltech · MMGIS M20 waypoints';
-const nf = d => v => v.toLocaleString('es', { minimumFractionDigits: d, maximumFractionDigits: d });
+const nf = d => v => v.toLocaleString('en', { minimumFractionDigits: d, maximumFractionDigits: d });
 
 const CARDS = [
   {
-    id: 'odometer', name: 'Distancia recorrida', unit: 'km', provider: NASA, fmt: nf(2), pick: p => p.dist_total_m / 1000,
-    say: v => `Equivale a ${nf(0)(v * 1000 / 400)} vueltas a una pista de atletismo desde el aterrizaje.`,
+    id: 'odometer', name: 'Distance driven', unit: 'km', provider: NASA, fmt: nf(2), pick: p => p.dist_total_m / 1000,
+    say: v => `That is ${nf(0)(v * 1000 / 400)} laps of a running track since landing.`,
   },
   {
-    id: 'elevation', name: 'Elevación', unit: 'm', provider: NASA, fmt: nf(0), pick: p => p.elev_geoid,
-    say: (v, pts) => `${v >= pts[0].y ? 'Ha subido' : 'Ha bajado'} ${nf(0)(Math.abs(v - pts[0].y))} m desde que aterrizó en el cráter Jezero.`,
+    id: 'elevation', name: 'Elevation', unit: 'm', provider: NASA, fmt: nf(0), pick: p => p.elev_geoid,
+    say: (v, pts) => `${v >= pts[0].y ? 'Climbed' : 'Descended'} ${nf(0)(Math.abs(v - pts[0].y))} m since landing in Jezero Crater.`,
   },
   {
-    id: 'tilt', name: 'Inclinación', unit: '°', provider: NASA, fmt: nf(1), pick: p => p.tilt,
-    say: v => `En su última parada el terreno era ${v < 5 ? 'casi plano' : 'una pendiente notable'}; con demasiada inclinación el rover podría volcar.`,
+    id: 'tilt', name: 'Tilt', unit: '°', provider: NASA, fmt: nf(1), pick: p => p.tilt,
+    say: v => `At its last stop the terrain was ${v < 5 ? 'nearly flat' : 'a noticeable slope'}; too much tilt could tip the rover over.`,
   },
   {
-    id: 'lighttime', name: 'Luz Tierra–Marte', unit: 'min', provider: 'Calculado en vivo · elementos keplerianos JPL', fmt: nf(2),
-    say: v => `Una orden tarda ${Math.floor(v)} min ${Math.round((v % 1) * 60)} s en llegar al rover y la respuesta otro tanto: por eso se maneja con planes, no con joystick.`,
+    id: 'lighttime', name: 'Earth–Mars light time', unit: 'min', provider: 'Computed live · JPL Keplerian elements', fmt: nf(2),
+    say: v => `A command takes ${Math.floor(v)} min ${Math.round((v % 1) * 60)} s to reach the rover and the reply takes as long: that is why it is driven with plans, not a joystick.`,
   },
 ];
 
 const panel = document.createElement('aside');
 panel.id = 'mcc';
-panel.innerHTML = `<h1>CONTROL DE MISIÓN <span>T · ocultar</span></h1>` + CARDS.map(c => `
+panel.innerHTML = `<h1>MISSION CONTROL <span>T · hide</span></h1>` + CARDS.map(c => `
   <section class="card" data-id="${c.id}" data-state="loading" data-value="">
-    <h2>${c.name}<em>CARGANDO</em></h2>
+    <h2>${c.name}<em>LOADING</em></h2>
     <div class="row"><div class="val"><b>—</b><i>${c.unit}</i></div><canvas width="320" height="80"></canvas></div>
     <p class="say"></p><footer>${c.provider}</footer>
   </section>`).join('');
@@ -56,32 +56,32 @@ function show(c, v, pts, sol) {
   card.dataset.state = 'ok';
   card.dataset.value = String(v);
   $(c, 'b').textContent = c.fmt(v);
-  $(c, 'em').textContent = sol ? `SOL ${sol}` : 'EN VIVO';
+  $(c, 'em').textContent = sol ? `SOL ${sol}` : 'LIVE';
   $(c, '.say').textContent = c.say(v, pts);
   chart(c, pts);
 }
 
 function fail(c, msg) {
   el(c).dataset.state = 'error';
-  $(c, 'em').textContent = 'SIN DATOS';
+  $(c, 'em').textContent = 'NO DATA';
   $(c, '.say').textContent = msg;
 }
 
-// los 3 datos reales de la mision salen del mismo archivo de waypoints (via proxy de Vite por CORS)
+// the 3 real mission values come from the same waypoints file (through a Vite proxy because of CORS)
 fetch('/mmgis/M20_waypoints.json')
   .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
   .then(({ features }) => {
     const props = features.map(f => f.properties).sort((a, b) => a.sol - b.sol);
     for (const c of CARDS.filter(c => c.pick)) {
       const pts = props.map(p => ({ x: p.sol, y: c.pick(p) })).filter(p => Number.isFinite(p.x) && Number.isFinite(p.y));
-      if (!pts.length) { fail(c, 'El archivo no trae este campo.'); continue; }
+      if (!pts.length) { fail(c, 'The file has no such field.'); continue; }
       const last = pts[pts.length - 1];
       show(c, last.y, pts, last.x);
     }
   })
-  .catch(e => CARDS.filter(c => c.pick).forEach(c => fail(c, `No se pudo leer el archivo de la NASA (${e.message}).`)));
+  .catch(e => CARDS.filter(c => c.pick).forEach(c => fail(c, `Could not read the NASA file (${e.message}).`)));
 
-// tiempo de luz: serie semanal desde el aterrizaje, el ultimo punto es "ahora"
+// light time: weekly series since landing, the last point is "now"
 const light = CARDS[3], DAY = 86400000;
 const series = [];
 for (let t = LANDING; t < Date.now(); t += 7 * DAY) series.push({ x: t, y: lightTimeMinutes(t) });

@@ -1,4 +1,4 @@
-// el archivo de waypoints de la NASA no envia cabeceras CORS: el dev server lo reenvia
+// the NASA waypoints file sends no CORS headers: the dev server forwards it
 export default {
   server: {
     proxy: {

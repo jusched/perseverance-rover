@@ -1,20 +1,20 @@
 import * as THREE from 'three';
 import PHOTOS from './photos.js';
 
-// pieza del modelo -> camara real (las fotos de photos.js salen de esa camara)
+// model part -> real camera (the photos in photos.js come from that camera)
 const CAMERAS = [
-  { id: 'mastcam', name: 'Mastcam-Z', part: 'Mastcam_Z_cams', nudge: [-13, -4] }, // ambas viven en la cabeza del mastil: se separan en pantalla
+  { id: 'mastcam', name: 'Mastcam-Z', part: 'Mastcam_Z_cams', nudge: [-13, -4] }, // both sit on the mast head: spread apart on screen
   { id: 'navcam', name: 'NavCam', part: 'NavCams', nudge: [13, -4] },
-  { id: 'hazcam', name: 'Hazcam delantera', part: 'hazcams_front' },
+  { id: 'hazcam', name: 'Front Hazcam', part: 'hazcams_front' },
   { id: 'watson', name: 'WATSON', part: 'WATSON' },
 ];
 
 const ago = utc => {
   const d = Math.floor((Date.now() - Date.parse(utc)) / 86400000);
-  return d <= 0 ? 'hoy' : d === 1 ? 'hace 1 día' : `hace ${d} días`;
+  return d <= 0 ? 'today' : d === 1 ? '1 day ago' : `${d} days ago`;
 };
 
-// click de obturador sintetizado: dos estallidos de ruido, sin archivos de audio
+// synthesized shutter click: two noise bursts, no audio files
 let audio;
 const shutterSound = () => {
   try {
@@ -25,7 +25,7 @@ const shutterSound = () => {
       const src = audio.createBufferSource(), gain = audio.createGain();
       gain.gain.value = 0.3; src.buffer = buf; src.connect(gain).connect(audio.destination); src.start(audio.currentTime + at);
     }
-  } catch { /* sin audio: el flash basta */ }
+  } catch { /* no audio: the flash is enough */ }
 };
 
 const fx = document.createElement('div');
@@ -35,10 +35,10 @@ const photo = document.createElement('div');
 photo.id = 'photo';
 photo.hidden = true;
 photo.innerHTML = `<figure>
-  <button class="x" aria-label="Cerrar">✕</button>
+  <button class="x" aria-label="Close">✕</button>
   <div class="frame"><img alt=""><div class="wait"></div></div>
   <figcaption><span class="cam-name"></span> · Sol <span class="sol"></span> · <span class="ago"></span><em></em></figcaption>
-  <p>← → más fotos de esta cámara · clic en la foto para ampliar · Esc volver al juego</p>
+  <p>← → more photos from this camera · click the photo to enlarge · Esc back to game</p>
 </figure>`;
 document.body.append(fx, photo);
 const img = photo.querySelector('img'), $ = s => photo.querySelector(s);
@@ -49,7 +49,7 @@ function show(i) {
   idx = (i + list.length) % list.length;
   const p = list[idx], mine = ++token;
   photo.dataset.state = 'loading';
-  $('.wait').textContent = `Recibiendo imagen de ${p.camera}…`;
+  $('.wait').textContent = `Receiving image from ${p.camera}…`;
   $('.cam-name').textContent = p.camera;
   $('.sol').textContent = p.sol;
   $('.ago').textContent = ago(p.utc);
@@ -58,10 +58,10 @@ function show(i) {
   img.onload = () => {
     if (mine !== token) return;
     photo.dataset.state = 'ok';
-    void img.offsetWidth; // reinicia la animacion de revelado
+    void img.offsetWidth; // restarts the reveal animation
     img.classList.add('develop');
   };
-  img.onerror = () => { if (mine === token) { photo.dataset.state = 'error'; $('.wait').textContent = 'No llegó la imagen. Prueba otra con ← →'; } };
+  img.onerror = () => { if (mine === token) { photo.dataset.state = 'error'; $('.wait').textContent = 'The image did not arrive. Try another with ← →'; } };
   img.src = p.url;
 }
 
@@ -98,12 +98,12 @@ addEventListener('keydown', e => {
   else if (e.code === 'ArrowLeft') show(idx - 1);
 });
 
-// puntos que brillan sobre las piezas del modelo; `rover` ya debe tener el modelo dentro
+// glowing dots over the model parts; `rover` must already contain the model
 export function initCameras(rover, camera, model) {
   rover.updateMatrixWorld(true);
   const dots = CAMERAS.map(c => {
     const node = model.getObjectByName(c.part);
-    if (!node) { console.warn(`[rover] pieza no encontrada: ${c.part}`); return null; }
+    if (!node) { console.warn(`[rover] part not found: ${c.part}`); return null; }
     const local = rover.worldToLocal(new THREE.Box3().setFromObject(node).getCenter(new THREE.Vector3()));
     const el = document.createElement('button');
     el.className = 'cam'; el.dataset.cam = c.id;
@@ -112,7 +112,7 @@ export function initCameras(rover, camera, model) {
     document.body.appendChild(el);
     return { el, local, nudge: c.nudge ?? [0, 0] };
   }).filter(Boolean);
-  console.log('[rover] cámaras listas:', CAMERAS.map(c => `${c.name} -> ${c.part}`).join(', '));
+  console.log('[rover] cameras ready:', CAMERAS.map(c => `${c.name} -> ${c.part}`).join(', '));
   const v = new THREE.Vector3();
   return () => {
     for (const d of dots) {
