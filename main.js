@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import './mission.js';
+import { initCameras } from './cameras.js';
 
 const SUN = new THREE.Vector3(-0.75, 0.16, -0.65).normalize();
 const FOG = 0xd9a066;
@@ -135,8 +136,8 @@ const ROVER_LENGTH = 3;
 const rover = new THREE.Group();
 rover.position.set(0, height(0, 10), 10);
 scene.add(rover);
-window.__rover = rover;
-let roverReady = false;
+window.__rover = rover; window.__camera = camera;
+let roverReady = false, updateCameras = null;
 new GLTFLoader().setDRACOLoader(new DRACOLoader().setDecoderPath('/draco/')).loadAsync('/models/perseverance.glb').then(({ scene: model }) => {
   const cams = [];
   model.traverse(o => {
@@ -159,6 +160,7 @@ new GLTFLoader().setDRACOLoader(new DRACOLoader().setDecoderPath('/draco/')).loa
   inner.rotation.y = alongX ? sign * Math.PI / 2 : (sign > 0 ? Math.PI : 0);
   console.log(`[rover] model size ${size.toArray().map(v => v.toFixed(2))} alongX=${alongX} frontSign=${sign} scale=${inner.scale.x.toFixed(3)}`);
   rover.add(inner);
+  updateCameras = initCameras(rover, camera, model);
   roverReady = true;
 });
 
@@ -190,6 +192,7 @@ let heading = 0, speed = 0, camSnap = true;
 const fwd = new THREE.Vector3(), right = new THREE.Vector3(), up = new THREE.Vector3(), t1 = new THREE.Vector3(), t2 = new THREE.Vector3();
 const basis = new THREE.Matrix4(), targetQ = new THREE.Quaternion(), camGoal = new THREE.Vector3(), look = new THREE.Vector3(), lookGoal = new THREE.Vector3();
 function drive(dt) {
+  if (document.body.classList.contains('photo')) keys.clear(); // el visor de fotos pausa el manejo
   const throttle = keys.has('KeyW') - keys.has('KeyS'), steer = keys.has('KeyA') - keys.has('KeyD');
   heading += steer * TURN * dt;
   fwd.set(-Math.sin(heading), 0, -Math.cos(heading));
@@ -197,6 +200,7 @@ function drive(dt) {
   // pendiente al frente: subir frena, bajar empuja; sin acelerar, el rover rueda y se frena solo
   const q = rover.position, slope = (height(q.x + fwd.x, q.z + fwd.z) - height(q.x - fwd.x, q.z - fwd.z)) / 2;
   speed += (throttle * MAX_SPEED - speed) * (throttle ? 2 : 0.6) * dt - G * slope / Math.hypot(1, slope) * dt;
+  if (!throttle && Math.abs(speed) < 0.3 && Math.abs(slope) < 0.3) speed = 0; // freno de estacionamiento: solo rueda solo en pendientes fuertes
   speed = THREE.MathUtils.clamp(speed, -MAX_SPEED * 1.5, MAX_SPEED * 1.5);
   rover.position.addScaledVector(fwd, speed * dt);
   // terreno bajo las 4 esquinas: altura media y inclinacion
@@ -243,5 +247,6 @@ renderer.setAnimationLoop(() => {
   }
   dust.geometry.attributes.position.needsUpdate = true;
   renderer.render(scene, camera);
+  updateCameras?.();
   if (roverReady && ++frames === 3) window.__ready = true;
 });

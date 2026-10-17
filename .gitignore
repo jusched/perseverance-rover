@@ -2,3 +2,5 @@ node_modules
 dist
 .dev.log
 check.png
+check-*.png
+dbg.png

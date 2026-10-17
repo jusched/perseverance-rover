@@ -30,6 +30,34 @@ try {
   const light = cards.find(c => c.id === 'lighttime');
   if (light && !(light.value > 3 && light.value < 23)) errors.push(`mission: tiempo de luz fuera de rango (${light.value})`);
 
+  // camaras: 4 puntos con su nombre; cada uno abre una foto real
+  await page.waitForFunction(() => document.querySelectorAll('.cam:not([hidden])').length === 4, null, { timeout: 10000 });
+  const names = await page.$$eval('.cam', cs => cs.map(c => `${c.dataset.cam}:${c.querySelector('b').textContent}`));
+  console.log('[cam] puntos:', names.join(', '));
+  await page.hover('.cam[data-cam=mastcam]', { force: true });
+  await page.screenshot({ path: 'check-hover.png' });
+  for (const id of ['mastcam', 'navcam', 'hazcam', 'watson']) {
+    await page.waitForSelector(`.cam[data-cam=${id}]:not([hidden])`);
+    await page.click(`.cam[data-cam=${id}]`, { force: true });
+    await page.waitForSelector('#photo:not([hidden])[data-state=ok]', { timeout: 25000 });
+    await page.waitForTimeout(3200); // deja terminar el revelado
+    const info = await page.$eval('#photo', p => ({ w: p.querySelector('img').naturalWidth, cap: p.querySelector('figcaption').textContent, src: p.querySelector('img').src }));
+    console.log(`[cam] ${id}: ${info.w}px | ${info.cap}`);
+    if (info.w < 800 || !/Sol \d+ · (hoy|hace \d+ días?)/.test(info.cap)) errors.push(`foto: ${id} no abrió una foto válida (${info.w}px, "${info.cap}")`);
+    await page.screenshot({ path: `check-photo-${id}.png` });
+    if (id === 'mastcam') {
+      await page.keyboard.press('ArrowRight');
+      await page.waitForFunction(() => document.querySelector('#photo figcaption em').textContent.startsWith('2/') && document.querySelector('#photo').dataset.state === 'ok', null, { timeout: 25000 });
+      await page.waitForTimeout(3200);
+      await page.click('#photo img');
+      if (!(await page.$eval('#photo', p => p.classList.contains('zoom')))) errors.push('foto: el clic no amplía');
+      await page.waitForTimeout(3200);
+      await page.screenshot({ path: 'check-photo-zoom.png' });
+    }
+    await page.keyboard.press('Escape');
+    if (!(await page.$eval('#photo', p => p.hidden))) errors.push(`foto: Esc no cierra (${id})`);
+  }
+
   await page.keyboard.down('KeyW');
   await page.waitForTimeout(4000);
   await page.keyboard.down('KeyD');
