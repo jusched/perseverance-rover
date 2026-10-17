@@ -7,7 +7,7 @@ import { initCameras } from './cameras.js';
 const SUN = new THREE.Vector3(-0.75, 0.16, -0.65).normalize();
 const FOG = 0xd9a066;
 
-// ruido de valor 2D
+// 2D value noise
 const hash = (x, y) => { const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return s - Math.floor(s); };
 const vnoise = (x, y) => {
   const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
@@ -38,7 +38,7 @@ const camY = height(0, 30) + 2.2;
 camera.position.set(0, camY, 30);
 camera.lookAt(-12, camY + 7, -50);
 
-// luz
+// light
 const sun = new THREE.DirectionalLight(0xffb066, 3.4);
 sun.position.copy(SUN).multiplyScalar(200);
 sun.castShadow = true;
@@ -48,7 +48,7 @@ sun.shadow.radius = 5;
 sun.shadow.bias = -0.0004;
 scene.add(sun, new THREE.HemisphereLight(0xf0b780, 0xa05a38, 1.3));
 
-// terreno
+// terrain
 const geo = new THREE.PlaneGeometry(1400, 1400, 320, 320);
 geo.rotateX(-Math.PI / 2);
 const pos = geo.attributes.position, col = new Float32Array(pos.count * 3);
@@ -65,7 +65,7 @@ const ground = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors
 ground.receiveShadow = true;
 scene.add(ground);
 
-// rocas
+// rocks
 const rockMat = new THREE.MeshStandardMaterial({ color: 0x6b3a28, roughness: 0.95, flatShading: true });
 const bases = Array.from({ length: 6 }, (_, k) => {
   const g = new THREE.IcosahedronGeometry(1, 2), p = g.attributes.position, v = new THREE.Vector3();
@@ -78,6 +78,7 @@ const bases = Array.from({ length: 6 }, (_, k) => {
   return g;
 });
 let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+const rocks = []; // big rocks the rover collides with
 for (let i = 0; i < 160; i++) {
   const x = (rnd() - 0.5) * 360, z = 20 - rnd() * 330, s = 0.25 + Math.pow(rnd(), 3) * 3.2;
   const r = new THREE.Mesh(bases[i % 6], rockMat);
@@ -85,9 +86,10 @@ for (let i = 0; i < 160; i++) {
   r.scale.setScalar(s); r.rotation.set(rnd() * 3, rnd() * 6, rnd() * 3);
   r.castShadow = r.receiveShadow = true;
   scene.add(r);
+  if (s > 0.6) rocks.push({ x, z, r: s * 0.95 });
 }
 
-// cielo caramelo con sol
+// caramel sky with sun
 const sky = new THREE.Mesh(new THREE.SphereGeometry(2500, 32, 16), new THREE.ShaderMaterial({
   side: THREE.BackSide, depthWrite: false, fog: false,
   uniforms: { sun: { value: SUN } },
@@ -106,7 +108,7 @@ const sky = new THREE.Mesh(new THREE.SphereGeometry(2500, 32, 16), new THREE.Sha
 scene.add(sky);
 const skyEnv = new THREE.PMREMGenerator(renderer).fromScene(new THREE.Scene().add(new THREE.Mesh(sky.geometry, sky.material)), 0, 0.1, 5000).texture;
 
-// lunas
+// moons
 const moon = (dir, r, color, sx, sy, sz, k) => {
   const g = new THREE.IcosahedronGeometry(1, 4), p = g.attributes.position, v = new THREE.Vector3();
   for (let i = 0; i < p.count; i++) {
@@ -119,25 +121,48 @@ const moon = (dir, r, color, sx, sy, sz, k) => {
   m.position.copy(dir.normalize().multiplyScalar(1800)); m.scale.setScalar(r);
   scene.add(m);
 };
-moon(new THREE.Vector3(0.3, 0.3, -0.9), 75, 0xa08672, 1.2, 0.95, 1, 1);    // Fobos
+moon(new THREE.Vector3(0.3, 0.3, -0.9), 75, 0xa08672, 1.2, 0.95, 1, 1);    // Phobos
 moon(new THREE.Vector3(-0.05, 0.5, -0.85), 32, 0xb09a88, 1, 0.9, 0.95, 5); // Deimos
 
-// polvo
+// dust
 const dot = (() => { const c = document.createElement("canvas"); c.width = c.height = 32; const g = c.getContext("2d"), r = g.createRadialGradient(16, 16, 0, 16, 16, 16); r.addColorStop(0, "#fff"); r.addColorStop(1, "#fff0"); g.fillStyle = r; g.fillRect(0, 0, 32, 32); return new THREE.CanvasTexture(c); })();
 const N = 700, dp = new Float32Array(N * 3);
 const scatter = (i, x, z) => dp.set([x, height(x, z) + 0.5 + rnd() * 14, z], i * 3);
 for (let i = 0; i < N; i++) scatter(i, (rnd() - 0.5) * 120, 10 + (rnd() - 0.5) * 120);
 const dust = new THREE.Points(new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(dp, 3)),
   new THREE.PointsMaterial({ color: 0xf0c890, size: 0.5, map: dot, alphaTest: 0.01, transparent: true, opacity: 0.8, depthWrite: false }));
+dust.frustumCulled = false; // its bounding sphere is computed once and goes stale as the dust follows the rover
 scene.add(dust);
 
-// rover Perseverance (modelo oficial NASA), tamaño real ~3 m de largo
+// Perseverance rover (official NASA model), real size ~3 m long
 const ROVER_LENGTH = 3;
 const rover = new THREE.Group();
 rover.position.set(0, height(0, 10), 10);
 scene.add(rover);
-window.__rover = rover; window.__camera = camera;
+window.__rover = rover; window.__camera = camera; window.__rocks = rocks;
 let roverReady = false, updateCameras = null;
+const wheels = [];
+// the GLB merges the 6 wheels into 3 meshes: split the triangles per wheel so each one spins on its own axle
+function splitWheels(node) {
+  const part = (x, z) => (x > 0) * 3 + (z < -0.6 ? 0 : z < 0.55 ? 1 : 2), v = new THREE.Vector3();
+  const boxes = Array.from({ length: 6 }, () => new THREE.Box3()), meshes = [...node.children];
+  for (const m of meshes) for (let a = m.geometry.attributes.position, i = 0; i < a.count; i++) boxes[part(a.getX(i), a.getZ(i))].expandByPoint(v.fromBufferAttribute(a, i));
+  const pivots = boxes.map(() => { const g = new THREE.Group(); node.add(g); return g; });
+  boxes.forEach((b, w) => { pivots[w].position.copy(b.getCenter(v)); wheels.push({ pivot: pivots[w], r: (b.max.y - b.min.y) / 2, spin: 0 }); });
+  for (const m of meshes) {
+    const a = m.geometry.attributes.position, idx = m.geometry.index.array, tris = Array.from({ length: 6 }, () => []);
+    for (let t = 0; t < idx.length; t += 3) tris[part(a.getX(idx[t]), a.getZ(idx[t]))].push(idx[t], idx[t + 1], idx[t + 2]);
+    tris.forEach((ids, w) => {
+      if (!ids.length) return;
+      const g = new THREE.BufferGeometry().setIndex(ids), piece = new THREE.Mesh(g, m.material);
+      for (const k in m.geometry.attributes) g.setAttribute(k, m.geometry.attributes[k]);
+      piece.position.copy(pivots[w].position).negate();
+      piece.castShadow = piece.receiveShadow = true;
+      pivots[w].add(piece);
+    });
+    node.remove(m);
+  }
+}
 new GLTFLoader().setDRACOLoader(new DRACOLoader().setDecoderPath('/draco/')).loadAsync('/models/perseverance.glb').then(({ scene: model }) => {
   const cams = [];
   model.traverse(o => {
@@ -147,8 +172,9 @@ new GLTFLoader().setDRACOLoader(new DRACOLoader().setDecoderPath('/draco/')).loa
     }
     if (/cam|lens/i.test(o.name) && !/^\d/.test(o.name)) cams.push(o.name);
   });
+  splitWheels(model.getObjectByName('Wheels_objs'));
   console.log('[rover] camera parts:', [...new Set(cams)].join(', '));
-  // el modelo no trae convencion de eje: largo = eje mayor, frente = lado de las hazcams delanteras
+  // the model has no axis convention: length = longer axis, front = side of the front hazcams
   const box = new THREE.Box3().setFromObject(model), size = box.getSize(new THREE.Vector3()), ctr = box.getCenter(new THREE.Vector3());
   const alongX = size.x > size.z;
   const hc = new THREE.Box3().setFromObject(model.getObjectByName('hazcams_front')).getCenter(new THREE.Vector3());
@@ -160,11 +186,19 @@ new GLTFLoader().setDRACOLoader(new DRACOLoader().setDecoderPath('/draco/')).loa
   inner.rotation.y = alongX ? sign * Math.PI / 2 : (sign > 0 ? Math.PI : 0);
   console.log(`[rover] model size ${size.toArray().map(v => v.toFixed(2))} alongX=${alongX} frontSign=${sign} scale=${inner.scale.x.toFixed(3)}`);
   rover.add(inner);
+  // which rover side each wheel is on and which way its axle points, so forward motion spins it the right way
+  rover.updateMatrixWorld(true);
+  const toRover = new THREE.Matrix4().copy(rover.matrixWorld).invert();
+  for (const w of wheels) {
+    w.side = Math.sign(rover.worldToLocal(w.pivot.getWorldPosition(new THREE.Vector3())).x);
+    w.dir = -Math.sign(new THREE.Vector3(1, 0, 0).transformDirection(w.pivot.matrixWorld).transformDirection(toRover).x);
+    w.r *= inner.scale.x;
+  }
   updateCameras = initCameras(rover, camera, model);
   roverReady = true;
 });
 
-// huellas: un sello oscuro por rueda cada 0.3 m recorridos
+// tracks: one dark stamp per wheel every 0.3 m driven
 const TRACKS = 4000;
 const tracks = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.45, 0.32).rotateX(-Math.PI / 2),
   new THREE.MeshStandardMaterial({ color: 0x4a2010, roughness: 1, transparent: true, opacity: 0.6, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }), TRACKS);
@@ -183,27 +217,39 @@ function leaveTracks() {
   tracks.instanceMatrix.needsUpdate = true;
 }
 
-// manejo WASD + camara de seguimiento
+// WASD driving + chase camera
 const keys = new Set();
 addEventListener('keydown', e => keys.add(e.code));
 addEventListener('keyup', e => keys.delete(e.code));
-const MAX_SPEED = 8, TURN = 1, G = 3.71 * 2.5; // m/s, rad/s (mucho mas rapido que el rover real), gravedad marciana x2.5 para que la pendiente se note
+const MAX_SPEED = 8, TURN = 1, G = 3.71 * 2.5; // m/s, rad/s (much faster than the real rover), Martian gravity x2.5 so slopes are felt
 let heading = 0, speed = 0, camSnap = true;
 const fwd = new THREE.Vector3(), right = new THREE.Vector3(), up = new THREE.Vector3(), t1 = new THREE.Vector3(), t2 = new THREE.Vector3();
 const basis = new THREE.Matrix4(), targetQ = new THREE.Quaternion(), camGoal = new THREE.Vector3(), look = new THREE.Vector3(), lookGoal = new THREE.Vector3();
 function drive(dt) {
-  if (document.body.classList.contains('photo')) keys.clear(); // el visor de fotos pausa el manejo
+  if (document.body.classList.contains('photo')) keys.clear(); // the photo viewer pauses driving
   const throttle = keys.has('KeyW') - keys.has('KeyS'), steer = keys.has('KeyA') - keys.has('KeyD');
   heading += steer * TURN * dt;
   fwd.set(-Math.sin(heading), 0, -Math.cos(heading));
   right.set(Math.cos(heading), 0, -Math.sin(heading));
-  // pendiente al frente: subir frena, bajar empuja; sin acelerar, el rover rueda y se frena solo
+  // slope ahead: climbing brakes, descending pushes; without throttle the rover coasts to a stop
   const q = rover.position, slope = (height(q.x + fwd.x, q.z + fwd.z) - height(q.x - fwd.x, q.z - fwd.z)) / 2;
   speed += (throttle * MAX_SPEED - speed) * (throttle ? 2 : 0.6) * dt - G * slope / Math.hypot(1, slope) * dt;
-  if (!throttle && Math.abs(speed) < 0.3 && Math.abs(slope) < 0.3) speed = 0; // freno de estacionamiento: solo rueda solo en pendientes fuertes
+  if (!throttle && Math.abs(speed) < 0.3 && Math.abs(slope) < 0.3) speed = 0; // parking brake: only rolls on its own on steep slopes
   speed = THREE.MathUtils.clamp(speed, -MAX_SPEED * 1.5, MAX_SPEED * 1.5);
   rover.position.addScaledVector(fwd, speed * dt);
-  // terreno bajo las 4 esquinas: altura media y inclinacion
+  for (const o of rocks) { // push the rover out of any big rock and lose the speed that went into it
+    const dx = rover.position.x - o.x, dz = rover.position.z - o.z, d = Math.hypot(dx, dz), min = o.r + 1.4;
+    if (d < min) {
+      rover.position.x = o.x + dx / d * min; rover.position.z = o.z + dz / d * min;
+      speed *= 1 - Math.abs(fwd.x * dx + fwd.z * dz) / d;
+    }
+  }
+  // rolling without slipping: each side's wheels turn with the distance that side travels (differential when steering)
+  for (const w of wheels) {
+    w.spin += (speed + w.side * steer * TURN * 1.15) * dt / w.r;
+    w.pivot.rotation.x = w.dir * w.spin;
+  }
+  // terrain under the 4 corners: mean height and tilt
   const p = rover.position, d = 1.4, hAt = (v, k) => height(p.x + v.x * d * k, p.z + v.z * d * k);
   const hF = hAt(fwd, 1), hB = hAt(fwd, -1), hR = hAt(right, 1), hL = hAt(right, -1);
   p.y = (hF + hB + hR + hL) / 4 + 0.05;
@@ -215,7 +261,7 @@ function drive(dt) {
   targetQ.setFromRotationMatrix(basis);
   rover.quaternion.slerp(targetQ, camSnap ? 1 : Math.min(1, 6 * dt));
   if ((sinceStamp += Math.abs(speed) * dt) > 0.3) { sinceStamp = 0; leaveTracks(); }
-  // camara detras y arriba, mirando al frente
+  // camera behind and above, looking ahead
   camGoal.copy(p).addScaledVector(fwd, -9).setY(p.y + 3.2);
   camGoal.y = Math.max(camGoal.y, height(camGoal.x, camGoal.z) + 1.2);
   lookGoal.copy(p).addScaledVector(fwd, 30).setY(p.y + 5.3);
@@ -238,7 +284,7 @@ renderer.setAnimationLoop(() => {
   const now = performance.now(), dt = Math.min((now - last) / 1000, 0.1);
   last = now;
   drive(dt);
-  // el sol y su sombra siguen al rover; el polvo se recicla alrededor de el
+  // the sun and its shadow follow the rover; dust is recycled around it
   sun.target.position.copy(rover.position);
   sun.position.copy(rover.position).addScaledVector(SUN, 200);
   for (let i = 0; i < N; i++) {
