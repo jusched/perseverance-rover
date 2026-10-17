@@ -7,7 +7,8 @@ const browser = await chromium.launch({
   args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
 });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
-page.on('console', m => ['error', 'warning'].includes(m.type()) && errors.push(`console.${m.type()}: ${m.text()}`));
+page.on('console', m => m.text().startsWith('[rover]') && console.log(m.text()));
+page.on('console', m =>['error', 'warning'].includes(m.type()) && errors.push(`console.${m.type()}: ${m.text()}`));
 page.on('pageerror', e => errors.push(`pageerror: ${e.message}`));
 page.on('requestfailed', r => errors.push(`requestfailed: ${r.url()}`));
 let ready = true;

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 
 const SUN = new THREE.Vector3(-0.75, 0.16, -0.65).normalize();
 const FOG = 0xd9a066;
@@ -33,11 +34,7 @@ scene.fog = new THREE.FogExp2(FOG, 0.0042);
 const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 4000);
 const camY = height(0, 30) + 2.2;
 camera.position.set(0, camY, 30);
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.target.set(-12, camY + 7, -50);
-controls.maxPolarAngle = Math.PI * 0.52;
-controls.enableDamping = true;
-controls.update();
+camera.lookAt(-12, camY + 7, -50);
 
 // luz
 const sun = new THREE.DirectionalLight(0xffb066, 3.4);
@@ -130,6 +127,34 @@ const dust = new THREE.Points(new THREE.BufferGeometry().setAttribute('position'
   new THREE.PointsMaterial({ color: 0xf0c890, size: 0.5, map: dot, alphaTest: 0.01, transparent: true, opacity: 0.8, depthWrite: false }));
 scene.add(dust);
 
+// rover Perseverance (modelo oficial NASA), tamaño real ~3 m de largo
+const ROVER_LENGTH = 3;
+const rover = new THREE.Group();
+rover.position.set(0, height(0, 10), 10);
+scene.add(rover);
+let roverReady = false;
+new GLTFLoader().setDRACOLoader(new DRACOLoader().setDecoderPath('/draco/')).loadAsync('/models/perseverance.glb').then(({ scene: model }) => {
+  const cams = [];
+  model.traverse(o => {
+    if (o.isMesh) o.castShadow = o.receiveShadow = true;
+    if (/cam|lens/i.test(o.name) && !/^\d/.test(o.name)) cams.push(o.name);
+  });
+  console.log('[rover] camera parts:', [...new Set(cams)].join(', '));
+  // el modelo no trae convencion de eje: largo = eje mayor, frente = lado de las hazcams delanteras
+  const box = new THREE.Box3().setFromObject(model), size = box.getSize(new THREE.Vector3()), ctr = box.getCenter(new THREE.Vector3());
+  const alongX = size.x > size.z;
+  const hc = new THREE.Box3().setFromObject(model.getObjectByName('hazcams_front')).getCenter(new THREE.Vector3());
+  const sign = Math.sign(alongX ? hc.x - ctr.x : hc.z - ctr.z);
+  const inner = new THREE.Group();
+  model.position.set(-ctr.x, -box.min.y, -ctr.z);
+  inner.add(model);
+  inner.scale.setScalar(ROVER_LENGTH / (alongX ? size.x : size.z));
+  inner.rotation.y = alongX ? sign * Math.PI / 2 : (sign > 0 ? Math.PI : 0);
+  console.log(`[rover] model size ${size.toArray().map(v => v.toFixed(2))} alongX=${alongX} frontSign=${sign} scale=${inner.scale.x.toFixed(3)}`);
+  rover.add(inner);
+  roverReady = true;
+});
+
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
@@ -139,7 +164,6 @@ let frames = 0;
 renderer.setAnimationLoop(() => {
   const t = (performance.now() - clock) / 1000;
   dust.position.x = Math.sin(t * 0.15) * 3; dust.position.y = Math.sin(t * 0.3) * 0.5;
-  controls.update();
   renderer.render(scene, camera);
-  if (++frames === 3) window.__ready = true;
+  if (roverReady && ++frames === 3) window.__ready = true;
 });
