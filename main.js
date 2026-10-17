@@ -190,7 +190,11 @@ new GLTFLoader().setDRACOLoader(new DRACOLoader().setDecoderPath('/draco/')).loa
   rover.updateMatrixWorld(true);
   const toRover = new THREE.Matrix4().copy(rover.matrixWorld).invert();
   for (const w of wheels) {
-    w.side = Math.sign(rover.worldToLocal(w.pivot.getWorldPosition(new THREE.Vector3())).x);
+    const at = rover.worldToLocal(w.pivot.getWorldPosition(new THREE.Vector3()));
+    w.side = Math.sign(at.x);
+    w.end = Math.abs(at.z) < 0.5 ? 0 : -Math.sign(at.z); // +1 front, -1 rear, 0 middle wheels do not steer
+    w.angle = 0;
+    w.pivot.rotation.order = 'YXZ'; // steer around the vertical axis outside the spin
     w.dir = -Math.sign(new THREE.Vector3(1, 0, 0).transformDirection(w.pivot.matrixWorld).transformDirection(toRover).x);
     w.r *= inner.scale.x;
   }
@@ -248,6 +252,8 @@ function drive(dt) {
   for (const w of wheels) {
     w.spin += (speed + w.side * steer * TURN * 1.15) * dt / w.r;
     w.pivot.rotation.x = w.dir * w.spin;
+    w.angle += (steer * 0.5 * w.end - w.angle) * Math.min(1, 8 * dt); // corner wheels turn the way the rover turns
+    w.pivot.rotation.y = w.angle;
   }
   // terrain under the 4 corners: mean height and tilt
   const p = rover.position, d = 1.4, hAt = (v, k) => height(p.x + v.x * d * k, p.z + v.z * d * k);

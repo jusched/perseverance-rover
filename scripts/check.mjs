@@ -76,6 +76,9 @@ try {
   await page.waitForTimeout(4000);
   await page.keyboard.down('KeyD');
   await page.waitForTimeout(1500);
+  const steered = await page.evaluate(() => { const a = []; window.__rover.traverse(n => { if (n.name === 'Wheels_objs') n.children.forEach(g => a.push(+g.rotation.y.toFixed(2))); }); return a; });
+  console.log('[rover] wheel steer angles while turning:', steered.join(' '));
+  if (steered.filter(v => Math.abs(v) > 0.2).length !== 4) errors.push('wheels: the 4 corner wheels did not steer');
   await page.keyboard.up('KeyD');
   await page.waitForTimeout(2500);
   console.log('[rover] pos', await page.evaluate(() => window.__rover.position.toArray().map(v => v.toFixed(1)).join(',')));
