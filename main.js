@@ -102,6 +102,7 @@ const sky = new THREE.Mesh(new THREE.SphereGeometry(2500, 32, 16), new THREE.Sha
     }`,
 }));
 scene.add(sky);
+const skyEnv = new THREE.PMREMGenerator(renderer).fromScene(new THREE.Scene().add(new THREE.Mesh(sky.geometry, sky.material)), 0, 0.1, 5000).texture;
 
 // lunas
 const moon = (dir, r, color, sx, sy, sz, k) => {
@@ -122,7 +123,8 @@ moon(new THREE.Vector3(-0.05, 0.5, -0.85), 32, 0xb09a88, 1, 0.9, 0.95, 5); // De
 // polvo
 const dot = (() => { const c = document.createElement("canvas"); c.width = c.height = 32; const g = c.getContext("2d"), r = g.createRadialGradient(16, 16, 0, 16, 16, 16); r.addColorStop(0, "#fff"); r.addColorStop(1, "#fff0"); g.fillStyle = r; g.fillRect(0, 0, 32, 32); return new THREE.CanvasTexture(c); })();
 const N = 700, dp = new Float32Array(N * 3);
-for (let i = 0; i < N; i++) dp.set([(rnd() - 0.5) * 120, camY - 1 + rnd() * 18, 30 - rnd() * 110], i * 3);
+const scatter = (i, x, z) => dp.set([x, height(x, z) + 0.5 + rnd() * 14, z], i * 3);
+for (let i = 0; i < N; i++) scatter(i, (rnd() - 0.5) * 120, 10 + (rnd() - 0.5) * 120);
 const dust = new THREE.Points(new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(dp, 3)),
   new THREE.PointsMaterial({ color: 0xf0c890, size: 0.5, map: dot, alphaTest: 0.01, transparent: true, opacity: 0.8, depthWrite: false }));
 scene.add(dust);
@@ -132,11 +134,15 @@ const ROVER_LENGTH = 3;
 const rover = new THREE.Group();
 rover.position.set(0, height(0, 10), 10);
 scene.add(rover);
+window.__rover = rover;
 let roverReady = false;
 new GLTFLoader().setDRACOLoader(new DRACOLoader().setDecoderPath('/draco/')).loadAsync('/models/perseverance.glb').then(({ scene: model }) => {
   const cams = [];
   model.traverse(o => {
-    if (o.isMesh) o.castShadow = o.receiveShadow = true;
+    if (o.isMesh) {
+      o.castShadow = o.receiveShadow = true;
+      for (const m of [o.material].flat()) { m.envMap = skyEnv; m.envMapIntensity = 0.8; }
+    }
     if (/cam|lens/i.test(o.name) && !/^\d/.test(o.name)) cams.push(o.name);
   });
   console.log('[rover] camera parts:', [...new Set(cams)].join(', '));
@@ -155,15 +161,83 @@ new GLTFLoader().setDRACOLoader(new DRACOLoader().setDecoderPath('/draco/')).loa
   roverReady = true;
 });
 
+// huellas: un sello oscuro por rueda cada 0.3 m recorridos
+const TRACKS = 4000;
+const tracks = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.45, 0.32).rotateX(-Math.PI / 2),
+  new THREE.MeshStandardMaterial({ color: 0x4a2010, roughness: 1, transparent: true, opacity: 0.6, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }), TRACKS);
+tracks.count = 0; tracks.frustumCulled = false; tracks.receiveShadow = true;
+scene.add(tracks);
+const WHEELS = [-1.15, 1.15].flatMap(x => [-1.1, 0, 1.1].map(z => new THREE.Vector3(x, 0, z)));
+let stamps = 0, sinceStamp = 0;
+const stamp = new THREE.Matrix4(), sp = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1);
+function leaveTracks() {
+  for (const w of WHEELS) {
+    rover.localToWorld(sp.copy(w));
+    sp.y = height(sp.x, sp.z) + 0.03;
+    tracks.setMatrixAt(stamps++ % TRACKS, stamp.compose(sp, rover.quaternion, one));
+  }
+  tracks.count = Math.min(stamps, TRACKS);
+  tracks.instanceMatrix.needsUpdate = true;
+}
+
+// manejo WASD + camara de seguimiento
+const keys = new Set();
+addEventListener('keydown', e => keys.add(e.code));
+addEventListener('keyup', e => keys.delete(e.code));
+const MAX_SPEED = 4, TURN = 1; // m/s, rad/s (mucho mas rapido que el rover real)
+let heading = 0, speed = 0, camSnap = true;
+const fwd = new THREE.Vector3(), right = new THREE.Vector3(), up = new THREE.Vector3(), t1 = new THREE.Vector3(), t2 = new THREE.Vector3();
+const basis = new THREE.Matrix4(), targetQ = new THREE.Quaternion(), camGoal = new THREE.Vector3(), look = new THREE.Vector3(), lookGoal = new THREE.Vector3();
+function drive(dt) {
+  const throttle = keys.has('KeyW') - keys.has('KeyS'), steer = keys.has('KeyA') - keys.has('KeyD');
+  speed += (throttle * MAX_SPEED - speed) * Math.min(1, 3 * dt);
+  heading += steer * TURN * dt;
+  fwd.set(-Math.sin(heading), 0, -Math.cos(heading));
+  right.set(Math.cos(heading), 0, -Math.sin(heading));
+  rover.position.addScaledVector(fwd, speed * dt);
+  // terreno bajo las 4 esquinas: altura media y inclinacion
+  const p = rover.position, d = 1.4, hAt = (v, k) => height(p.x + v.x * d * k, p.z + v.z * d * k);
+  const hF = hAt(fwd, 1), hB = hAt(fwd, -1), hR = hAt(right, 1), hL = hAt(right, -1);
+  p.y = (hF + hB + hR + hL) / 4 + 0.05;
+  t1.copy(fwd).multiplyScalar(2 * d).setY(hF - hB);
+  t2.copy(right).multiplyScalar(2 * d).setY(hR - hL);
+  up.crossVectors(t2, t1).normalize();
+  t1.addScaledVector(up, -t1.dot(up)).normalize();
+  basis.makeBasis(t2.crossVectors(t1, up), up, t1.negate());
+  targetQ.setFromRotationMatrix(basis);
+  rover.quaternion.slerp(targetQ, camSnap ? 1 : Math.min(1, 6 * dt));
+  if ((sinceStamp += Math.abs(speed) * dt) > 0.3) { sinceStamp = 0; leaveTracks(); }
+  // camara detras y arriba, mirando al frente
+  camGoal.copy(p).addScaledVector(fwd, -9).setY(p.y + 3.2);
+  camGoal.y = Math.max(camGoal.y, height(camGoal.x, camGoal.z) + 1.2);
+  lookGoal.copy(p).addScaledVector(fwd, 30).setY(p.y + 5.3);
+  const k = camSnap ? 1 : 1 - Math.exp(-3 * dt);
+  camera.position.lerp(camGoal, k);
+  look.lerp(lookGoal, k);
+  camera.lookAt(look);
+  camSnap = false;
+}
+camSnap = true;
+
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
 });
-const clock = performance.now();
+scene.add(sun.target);
+let last = performance.now();
 let frames = 0;
 renderer.setAnimationLoop(() => {
-  const t = (performance.now() - clock) / 1000;
-  dust.position.x = Math.sin(t * 0.15) * 3; dust.position.y = Math.sin(t * 0.3) * 0.5;
+  const now = performance.now(), dt = Math.min((now - last) / 1000, 0.1);
+  last = now;
+  drive(dt);
+  // el sol y su sombra siguen al rover; el polvo se recicla alrededor de el
+  sun.target.position.copy(rover.position);
+  sun.position.copy(rover.position).addScaledVector(SUN, 200);
+  for (let i = 0; i < N; i++) {
+    const dx = dp[i * 3] - rover.position.x, dz = dp[i * 3 + 2] - rover.position.z;
+    if (Math.abs(dx) > 60 || Math.abs(dz) > 60) scatter(i, dp[i * 3] - Math.sign(dx) * (Math.abs(dx) > 60) * 120, dp[i * 3 + 2] - Math.sign(dz) * (Math.abs(dz) > 60) * 120);
+  }
+  dust.geometry.attributes.position.needsUpdate = true;
   renderer.render(scene, camera);
   if (roverReady && ++frames === 3) window.__ready = true;
 });

@@ -15,7 +15,13 @@ let ready = true;
 try {
   await page.goto(url, { timeout: 15000 });
   await page.waitForFunction(() => window.__ready, null, { timeout: 30000 });
-  await page.waitForTimeout(1000);
+  await page.keyboard.down('KeyW');
+  await page.waitForTimeout(4000);
+  await page.keyboard.down('KeyD');
+  await page.waitForTimeout(1500);
+  await page.keyboard.up('KeyD');
+  await page.waitForTimeout(2500);
+  console.log('[rover] pos', await page.evaluate(() => window.__rover.position.toArray().map(v => v.toFixed(1)).join(',')));
 } catch (e) { ready = false; errors.push(`load: ${e.message.split('\n')[0]}`); }
 await page.screenshot({ path: 'check.png' });
 await browser.close();
